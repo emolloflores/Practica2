@@ -419,6 +419,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: false
+          trivyignores: '.trivyignore'
 
       - name: Scan image - academic-service
         uses: aquasecurity/trivy-action@0.20.0
@@ -427,6 +428,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: false
+          trivyignores: '.trivyignore'
 
       - name: Scan image - api-gateway
         uses: aquasecurity/trivy-action@0.20.0
@@ -435,6 +437,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: false
+          trivyignores: '.trivyignore'
 
       - name: Scan image - frontend
         uses: aquasecurity/trivy-action@0.20.0
@@ -443,3 +446,4 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: false
+          trivyignores: '.trivyignore'

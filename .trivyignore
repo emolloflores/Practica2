@@ -1,0 +1,36 @@
+# .trivyignore — Registro de vulnerabilidades aceptadas
+#
+# Estas CVEs pertenecen a los paquetes BUNDLEADOS dentro de npm@10.x,
+# que viene preinstalado en la imagen base node:20-alpine.
+# Se encuentran en /usr/lib/node_modules/npm/node_modules/ y NO forman
+# parte del código ni de las dependencias de la aplicación.
+#
+# Evidencia: ninguna de estas versiones aparece en package-lock.json
+# de ningún servicio como dependencia de producción.
+#
+# Riesgo: bajo en contexto de producción — estas rutas de código son
+# invocadas únicamente por npm durante la gestión de paquetes (npm install,
+# npm publish), operación que NO ocurre en el contenedor en ejecución.
+# El contenedor de producción inicia con "node src/server.js", no con npm.
+#
+# Acción tomada: se documentó la fuente (npm bundled) y se evaluó el
+# impacto como aceptable dado que el vector de explotación requiere que
+# un atacante ejecute comandos npm dentro del contenedor.
+#
+# Revisión recomendada: cuando node:20-alpine incluya npm@11+ con
+# tar >= 7.5.8, minimatch >= 10.2.1, remover estas entradas.
+
+# cross-spawn 7.0.3 en npm@10 (CVE fijada en 7.0.5, requiere actualizar npm)
+CVE-2024-21538
+
+# glob 10.4.2 en npm@10 (CVE fijada en 10.5.0, requiere actualizar npm)
+CVE-2025-64756
+
+# minimatch 9.0.5 en npm@10 (fix requiere salto mayor a 10.x)
+CVE-2026-26996
+
+# tar 6.2.1 en npm@10 (fix requiere salto mayor a 7.x; npm aún usa tar@6)
+CVE-2026-23745
+CVE-2026-23950
+CVE-2026-24842
+CVE-2026-26960
