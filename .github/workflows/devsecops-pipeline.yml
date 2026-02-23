@@ -1,4 +1,4 @@
-name: DevSecOps CI/CD Pipeline
+name: DevSecOps CI/CD Pipeline Tarea 2
 
 # Trigger: se activa en push y pull_request dirigidos a la rama main.
 # Cubre tanto integración continua (PRs) como entrega continua (merges).
