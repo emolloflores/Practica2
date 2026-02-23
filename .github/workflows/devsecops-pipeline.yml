@@ -392,6 +392,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build]
     steps:
+      # Checkout necesario para que .trivyignore esté disponible en el workspace.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       # Descargar las imágenes exactas construidas y exportadas en Stage 6.
       - name: Download Docker images artifact
         uses: actions/download-artifact@v4
