@@ -5,7 +5,12 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // Ignorar output generado y configuraciones de herramientas externas.
+  // cypress.config.js usa la firma estándar de Cypress (on, config) que puede
+  // estar vacía — excluirla evita falsos positivos de no-unused-vars.
+  globalIgnores(['dist/', 'cypress.config.js']),
+
+  // ── Configuración principal para código fuente React/JS ─────────────
   {
     files: ['**/*.{js,jsx}'],
     extends: [
@@ -24,6 +29,18 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+    },
+  },
+
+  // ── Globales de Jest para archivos de test ───────────────────────────
+  // Jest inyecta describe, test, expect, beforeAll, afterAll, etc. como
+  // globales implícitos. Sin este bloque ESLint los reporta como no definidos.
+  {
+    files: ['**/__tests__/**/*.{js,jsx}', '**/*.test.{js,jsx}', '**/*.spec.{js,jsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.jest,
+      },
     },
   },
 ])

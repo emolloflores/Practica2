@@ -1,0 +1,445 @@
+name: DevSecOps CI/CD Pipeline
+
+# Trigger: se activa en push y pull_request dirigidos a la rama main.
+# Cubre tanto integración continua (PRs) como entrega continua (merges).
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  # =============================================================
+  # STAGE 1 — INSTALL
+  # Instalación reproducible de dependencias con npm ci.
+  # npm ci lee package-lock.json estrictamente: falla si el lockfile
+  # no existe, está desactualizado respecto a package.json, o fue
+  # modificado manualmente. Garantiza builds deterministas en CI.
+  # =============================================================
+  install:
+    name: "Stage 1 · Install"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Cachear node_modules usando el hash de todos los package-lock.json
+      # como clave. Si cualquier lockfile cambia, el caché se invalida
+      # y npm ci reconstruye los módulos desde cero.
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            frontend/node_modules
+            backend/users-service/node_modules
+            backend/academic-service/node_modules
+            backend/api-gateway/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            node-modules-${{ runner.os }}-
+
+      # npm ci (clean install): elimina node_modules y reinstala desde
+      # package-lock.json. Falla con exit code 1 si hay inconsistencias.
+      - name: Install - frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install - users-service
+        working-directory: backend/users-service
+        run: npm ci
+
+      - name: Install - academic-service
+        working-directory: backend/academic-service
+        run: npm ci
+
+      - name: Install - api-gateway
+        working-directory: backend/api-gateway
+        run: npm ci
+
+  # =============================================================
+  # STAGE 2 — LINT
+  # Análisis estático de calidad con ESLint.
+  # ESLint sale con exit code 1 cuando encuentra errores (no warnings),
+  # lo que detiene el pipeline. Los warnings son informativos.
+  # =============================================================
+  lint:
+    name: "Stage 2 · Lint (ESLint)"
+    runs-on: ubuntu-latest
+    needs: [install]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Restaurar el caché creado en Stage 1 para evitar reinstalar.
+      - name: Restore node_modules cache
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: |
+            frontend/node_modules
+            backend/users-service/node_modules
+            backend/academic-service/node_modules
+            backend/api-gateway/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+
+      # Caso borde: si el caché no está disponible (p.ej. primer run tras
+      # un cambio en el lockfile), reinstalar para no bloquear el pipeline.
+      - name: Fallback install on cache miss
+        if: steps.cache-restore.outputs.cache-hit != 'true'
+        run: |
+          cd frontend && npm ci && cd ..
+          cd backend/users-service && npm ci && cd ../..
+          cd backend/academic-service && npm ci && cd ../..
+          cd backend/api-gateway && npm ci && cd ../..
+
+      # Frontend tiene eslint.config.js configurado para React + Vite.
+      # "npm run lint" ejecuta "eslint ." — falla ante errores, no ante warnings.
+      - name: Lint - frontend
+        working-directory: frontend
+        run: npm run lint
+
+      # Los servicios backend tienen eslint.config.js con flat config v9:
+      # reglas no-eval, no-new-func, no-unused-vars (caughtErrors:'none'),
+      # eqeqeq y no-var. "npm run lint" usa el config del propio proyecto,
+      # garantizando coherencia entre CI y el entorno local del desarrollador.
+      - name: Lint - users-service
+        working-directory: backend/users-service
+        run: npm run lint
+
+      - name: Lint - academic-service
+        working-directory: backend/academic-service
+        run: npm run lint
+
+      - name: Lint - api-gateway
+        working-directory: backend/api-gateway
+        run: npm run lint
+
+  # =============================================================
+  # STAGE 3 — TEST
+  # Ejecución de tests unitarios con Jest.
+  # Gate real: Jest sale con exit code 1 si algún test falla,
+  # deteniendo el pipeline antes de analizar o construir código roto.
+  # NOTA: backend/users-service/__tests___/ tiene un typo (3 guiones
+  # bajos). Jest no encontrará sus tests hasta que se corrija a __tests__/
+  # =============================================================
+  test:
+    name: "Stage 3 · Test (Jest)"
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Restore node_modules cache
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: |
+            frontend/node_modules
+            backend/users-service/node_modules
+            backend/academic-service/node_modules
+            backend/api-gateway/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Fallback install on cache miss
+        if: steps.cache-restore.outputs.cache-hit != 'true'
+        run: |
+          cd frontend && npm ci && cd ..
+          cd backend/users-service && npm ci && cd ../..
+          cd backend/academic-service && npm ci && cd ../..
+          cd backend/api-gateway && npm ci && cd ../..
+
+      # "npm test" invoca Jest. El pipeline se detiene aquí si algún test
+      # falla, impidiendo que código roto avance hacia producción.
+      - name: Test - frontend
+        working-directory: frontend
+        run: npm test
+
+      - name: Test - users-service
+        working-directory: backend/users-service
+        run: npm test
+
+      - name: Test - academic-service
+        working-directory: backend/academic-service
+        run: npm test
+
+      - name: Test - api-gateway
+        working-directory: backend/api-gateway
+        run: npm test
+
+  # =============================================================
+  # STAGE 4 — SAST
+  # Análisis estático de seguridad con Semgrep.
+  # Rulesets: p/javascript (vulnerabilidades JS genéricas) +
+  #           p/nodejs (vulnerabilidades específicas de Node.js).
+  # --severity=ERROR: ejecutar solo reglas con severidad ERROR (alta).
+  # Falla con exit code 1 si hay hallazgos al nivel indicado.
+  # Semgrep excluye node_modules automáticamente.
+  # =============================================================
+  sast:
+    name: "Stage 4 · SAST (Semgrep)"
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Instalar Semgrep CLI via pip (disponible en ubuntu-latest por defecto).
+      - name: Install Semgrep
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install semgrep
+
+      # Escanear cada servicio con ambos rulesets en el directorio src/.
+      # Si Semgrep encuentra hallazgos de nivel ERROR, sale con código 1.
+      - name: SAST - frontend
+        working-directory: frontend
+        run: |
+          semgrep \
+            --config p/javascript \
+            --config p/nodejs \
+            --severity=ERROR \
+            src/
+
+      - name: SAST - users-service
+        working-directory: backend/users-service
+        run: |
+          semgrep \
+            --config p/javascript \
+            --config p/nodejs \
+            --severity=ERROR \
+            src/
+
+      - name: SAST - academic-service
+        working-directory: backend/academic-service
+        run: |
+          semgrep \
+            --config p/javascript \
+            --config p/nodejs \
+            --severity=ERROR \
+            src/
+
+      - name: SAST - api-gateway
+        working-directory: backend/api-gateway
+        run: |
+          semgrep \
+            --config p/javascript \
+            --config p/nodejs \
+            --severity=ERROR \
+            src/
+
+  # =============================================================
+  # STAGE 5 — SCA
+  # Análisis de composición de software con npm audit.
+  # Examina el árbol de dependencias contra la base de datos de CVEs de npm.
+  # --audit-level=critical: falla SOLO ante vulnerabilidades CRITICAL.
+  # HIGH, MODERATE y LOW se reportan en el log pero no bloquean.
+  # =============================================================
+  sca:
+    name: "Stage 5 · SCA (npm audit)"
+    runs-on: ubuntu-latest
+    needs: [sast]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Restore node_modules cache
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: |
+            frontend/node_modules
+            backend/users-service/node_modules
+            backend/academic-service/node_modules
+            backend/api-gateway/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Fallback install on cache miss
+        if: steps.cache-restore.outputs.cache-hit != 'true'
+        run: |
+          cd frontend && npm ci && cd ..
+          cd backend/users-service && npm ci && cd ../..
+          cd backend/academic-service && npm ci && cd ../..
+          cd backend/api-gateway && npm ci && cd ../..
+
+      # npm audit necesita node_modules para resolver el árbol de dependencias.
+      # Sale con exit code 1 si encuentra vulnerabilidades CRITICAL.
+      - name: SCA - frontend
+        working-directory: frontend
+        run: npm audit --audit-level=critical
+
+      - name: SCA - users-service
+        working-directory: backend/users-service
+        run: npm audit --audit-level=critical
+
+      - name: SCA - academic-service
+        working-directory: backend/academic-service
+        run: npm audit --audit-level=critical
+
+      - name: SCA - api-gateway
+        working-directory: backend/api-gateway
+        run: npm audit --audit-level=critical
+
+  # =============================================================
+  # STAGE 6 — BUILD
+  # Construcción de imágenes Docker para los 4 servicios.
+  # Las imágenes se etiquetan con github.sha para trazabilidad completa:
+  # permite identificar exactamente qué commit originó cada imagen.
+  # Las imágenes se exportan como artefactos para el siguiente stage.
+  # =============================================================
+  build:
+    name: "Stage 6 · Docker Build"
+    runs-on: ubuntu-latest
+    needs: [sca]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Crear .env desde los ejemplos (valores placeholder, sin secretos reales).
+      # Necesario para que el contexto de build del frontend resuelva VITE_API_URL.
+      - name: Create .env files from examples
+        run: |
+          cp backend/users-service/.env.example  backend/users-service/.env
+          cp backend/academic-service/.env.example backend/academic-service/.env
+          cp backend/api-gateway/.env.example     backend/api-gateway/.env
+          cp frontend/.env.example                frontend/.env
+
+      # Docker Buildx habilita BuildKit para builds más eficientes y features
+      # modernas (multi-platform, cache de capas, etc.).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Cada imagen recibe dos tags:
+      #   :${{ github.sha }} — tag inmutable para trazabilidad en auditorías
+      #   :latest            — tag conveniente para testing local
+      - name: Build image - users-service
+        run: |
+          docker build \
+            -t users-service:${{ github.sha }} \
+            -t users-service:latest \
+            backend/users-service/
+
+      - name: Build image - academic-service
+        run: |
+          docker build \
+            -t academic-service:${{ github.sha }} \
+            -t academic-service:latest \
+            backend/academic-service/
+
+      - name: Build image - api-gateway
+        run: |
+          docker build \
+            -t api-gateway:${{ github.sha }} \
+            -t api-gateway:latest \
+            backend/api-gateway/
+
+      - name: Build image - frontend
+        run: |
+          docker build \
+            -t frontend:${{ github.sha }} \
+            -t frontend:latest \
+            frontend/
+
+      # Serializar y comprimir las imágenes para pasarlas al Stage 7.
+      # Garantiza que Trivy analice exactamente las mismas imágenes construidas
+      # aquí, no reconstrucciones que podrían diferir por cambios de contexto.
+      - name: Export Docker images as artifacts
+        run: |
+          mkdir -p /tmp/docker-images
+          docker save users-service:${{ github.sha }}    | gzip > /tmp/docker-images/users-service.tar.gz
+          docker save academic-service:${{ github.sha }} | gzip > /tmp/docker-images/academic-service.tar.gz
+          docker save api-gateway:${{ github.sha }}      | gzip > /tmp/docker-images/api-gateway.tar.gz
+          docker save frontend:${{ github.sha }}         | gzip > /tmp/docker-images/frontend.tar.gz
+
+      - name: Upload Docker images artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images-${{ github.sha }}
+          path: /tmp/docker-images/*.tar.gz
+          # Retener 1 día: solo se necesita entre Stage 6 y Stage 7 del mismo run.
+          retention-days: 1
+
+  # =============================================================
+  # STAGE 7 — SCAN-CONTAINER
+  # Escaneo de vulnerabilidades en imágenes Docker con Trivy.
+  # Trivy analiza el sistema base (Alpine), paquetes OS y dependencias
+  # de la aplicación embebidas en cada capa de la imagen.
+  # Falla ante cualquier vulnerabilidad CRITICAL o HIGH encontrada.
+  # =============================================================
+  scan-container:
+    name: "Stage 7 · Container Scan (Trivy)"
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      # Descargar las imágenes exactas construidas y exportadas en Stage 6.
+      - name: Download Docker images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images-${{ github.sha }}
+          path: /tmp/docker-images/
+
+      # Cargar las imágenes en el daemon Docker del runner actual.
+      - name: Load Docker images
+        run: |
+          docker load -i /tmp/docker-images/users-service.tar.gz
+          docker load -i /tmp/docker-images/academic-service.tar.gz
+          docker load -i /tmp/docker-images/api-gateway.tar.gz
+          docker load -i /tmp/docker-images/frontend.tar.gz
+
+      # Trivy escanea vulnerabilidades conocidas (CVEs) en la imagen.
+      # severity: CRITICAL,HIGH — solo reportar vulnerabilidades graves.
+      # exit-code: '1'         — detener el pipeline si hay hallazgos.
+      # ignore-unfixed: false  — incluir CVEs sin parche disponible
+      #                          (decisión explícita: visibilidad completa).
+      - name: Scan image - users-service
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: users-service:${{ github.sha }}
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: false
+
+      - name: Scan image - academic-service
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: academic-service:${{ github.sha }}
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: false
+
+      - name: Scan image - api-gateway
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: api-gateway:${{ github.sha }}
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: false
+
+      - name: Scan image - frontend
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: frontend:${{ github.sha }}
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: false
